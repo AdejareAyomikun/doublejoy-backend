@@ -1,9 +1,8 @@
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import IsAdminUser
-from .models import User
-from .serializers import UserSerializer
+# accounts/views.py
+from rest_framework import generics, permissions
+from .serializers import RegisterSerializer
+from django.conf import settings
 
-class UserViewSet(ModelViewSet):
-    queryset = User.objects.all().order_by('-date_joined')
-    serializer_class = UserSerializer
-    permission_classes = [IsAdminUser]
+class RegisterView(generics.CreateAPIView):
+    serializer_class = RegisterSerializer
+    permission_classes = [permissions.AllowAny]

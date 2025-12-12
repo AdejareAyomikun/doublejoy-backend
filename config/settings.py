@@ -1,8 +1,10 @@
+from datetime import timedelta
 from pathlib import Path
 from decouple import config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY')
+ADMIN_REGISTRATION_KEY = config('ADMIN_REGISTRATION_KEY')
 DEBUG = True
 ALLOWED_HOSTS = []
 AUTH_USER_MODEL = "accounts.User"
@@ -41,7 +43,7 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticatedOrReadOnly",
+        "rest_framework.permissions.IsAuthenticated",
     ),
 }
 
@@ -87,6 +89,11 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+}
 
 LANGUAGE_CODE = 'en-us'
 
