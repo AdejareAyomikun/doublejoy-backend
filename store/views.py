@@ -1,35 +1,30 @@
-import uuid
-from rest_framework.views import APIView
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, status
 from .permissions import IsAdminOrReadOnly
-from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny
-from .models import Product, Category, CartItem
-from .serializers import ProductSerializer, CategorySerializer, CartItemSerializer
+from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated
+from .models import Product, Category, Cart, CartItem
+from .serializers import ProductSerializer, CategorySerializer, CartSerializer
+from rest_framework.decorators import action
 from .permissions import IsAdminOrReadOnly
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 
 class CartViewSet(viewsets.ViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
-    def _get_session_id(self, request):
-        session_id = request.COOKIES.get("session_id")
-        if not session_id:
-            session_id = str(uuid.uuid4())
-        return session_id
+    def get_cart(self, user):
+        cart, _ = Cart.objects.get_or_create(user=user)
+        return cart
 
     def list(self, request):
-        session_id = self._get_session_id(request)
-        items = CartItem.objects.filter(session_id=session_id)
-        serializer = CartItemSerializer(items, many=True)
-
-        response = Response(serializer.data)
-        response.set_cookie("session_id", session_id)
-        return response
+        """GET /cart/ - get the current user's cart"""
+        cart = self.get_cart(request.user)
+        serializer = CartSerializer(cart)
+        return Response(serializer.data)
 
     def create(self, request):
-        session_id = self._get_session_id(request)
+        """POST /cart/ - add a product to the cart"""
+        cart = self.get_cart(request.user)
 
         product_id = request.data.get("product_id")
         quantity = int(request.data.get("quantity", 1))
@@ -48,22 +43,20 @@ class CartViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        cart_item, created = CartItem.objects.get_or_create(
-            session_id=session_id,
-            product=product,
-            defaults={"quantity": quantity}
-        )
+        item, created = CartItem.objects.get_or_create(
+            cart=cart, product=product)
+        item.quantity = item.quantity + quantity if not created else quantity
+        item.save()
 
-        if not created:
-            cart_item.quantity += quantity
-            cart_item.save()
+        serializer = CartSerializer(cart)
+        return Response(serializer.data)
 
-        response = Response(
-            CartItemSerializer(cart_item).data,
-            status=status.HTTP_201_CREATED
-        )
-        response.set_cookie("session_id", session_id)
-        return response
+    @action(detail=False, methods=["post"])
+    def clear(self, request):
+        """POST /cart/clear/ - remove all items from cart"""
+        cart = self.get_cart(request.user)
+        cart.items.all().delete()
+        return Response({"message": "Cart cleared"})
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
