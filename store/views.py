@@ -1,12 +1,12 @@
 from rest_framework import viewsets, status
-from .permissions import IsAdminOrReadOnly
 from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated
-from .models import Product, Category, Cart, CartItem
-from .serializers import ProductSerializer, CategorySerializer, CartSerializer
 from rest_framework.decorators import action
-from .permissions import IsAdminOrReadOnly
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
+
+from .models import Product, Category, Cart, CartItem
+from .serializers import ProductSerializer, CategorySerializer, CartSerializer
+from .permissions import IsAdminOrReadOnly
 
 
 class CartViewSet(viewsets.ViewSet):
@@ -17,13 +17,11 @@ class CartViewSet(viewsets.ViewSet):
         return cart
 
     def list(self, request):
-        """GET /cart/ - get the current user's cart"""
         cart = self.get_cart(request.user)
-        serializer = CartSerializer(cart)
+        serializer = CartSerializer(cart, context={'request': request})
         return Response(serializer.data)
 
     def create(self, request):
-        """POST /cart/ - add a product to the cart"""
         cart = self.get_cart(request.user)
 
         product_id = request.data.get("product_id")
@@ -44,19 +42,72 @@ class CartViewSet(viewsets.ViewSet):
             )
 
         item, created = CartItem.objects.get_or_create(
-            cart=cart, product=product)
-        item.quantity = item.quantity + quantity if not created else quantity
+            cart=cart, product=product
+        )
+        if created:
+            item.quantity = max(1, quantity)
+        else:
+            item.quantity = max(1, item.quantity + quantity)
+
         item.save()
 
-        serializer = CartSerializer(cart)
-        return Response(serializer.data)
+        serializer = CartSerializer(cart, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"])
+    def update_quantity(self, request):
+        cart = self.get_cart(request.user)
+        item_id = request.data.get("item_id")
+        action_type = request.data.get("action")
+
+        if not item_id or action_type not in ["increment", "decrement"]:
+            return Response(
+                {"error": "item_id and valid action are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            item = CartItem.objects.get(id=item_id, cart=cart)
+        except CartItem.DoesNotExist:
+            return Response(
+                {"error": "Cart item not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        if action_type == "increment":
+            item.quantity += 1
+            item.save()
+        elif action_type == "decrement":
+            item.quantity -= 1
+            if item.quantity <= 0:
+                item.delete()
+            else:
+                item.save()
+
+        serializer = CartSerializer(cart, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+    @action(detail=False, methods=["post"])
+    def remove_item(self, request):
+        cart = self.get_cart(request.user)
+        item_id = request.data.get("item_id")
+
+        if not item_id:
+            return Response(
+                {"error": "item_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        CartItem.objects.filter(id=item_id, cart=cart).delete()
+
+        serializer = CartSerializer(cart, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"])
     def clear(self, request):
-        """POST /cart/clear/ - remove all items from cart"""
         cart = self.get_cart(request.user)
         cart.items.all().delete()
-        return Response({"message": "Cart cleared"})
+        return Response({"message": "Cart cleared"}, status=status.HTTP_200_OK)
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
