@@ -1,10 +1,11 @@
+
 from rest_framework import viewsets, status
 from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
-from .models import Product, Category, Cart, CartItem
+from .models import Product, Category, Cart, CartItem, Order, OrderItem
 from .serializers import ProductSerializer, CategorySerializer, CartSerializer
 from .permissions import IsAdminOrReadOnly
 
@@ -86,7 +87,6 @@ class CartViewSet(viewsets.ViewSet):
         serializer = CartSerializer(cart, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
     @action(detail=False, methods=["post"])
     def remove_item(self, request):
         cart = self.get_cart(request.user)
@@ -109,6 +109,42 @@ class CartViewSet(viewsets.ViewSet):
         cart.items.all().delete()
         return Response({"message": "Cart cleared"}, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["post"])
+    def checkout(self, request):
+        cart = self.get_cart(request.user)
+
+        if not cart.items.exists():
+            return Response(
+                {"error": "Cart is empty"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        total_price = sum(
+            item.product.price * item.quantity for item in cart.items.all()
+        )
+
+        order = Order.objects.create(
+            user=request.user,
+            total_price=total_price,
+            status="pending"
+        )
+        for item in cart.items.all():
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                quantity=item.quantity,
+                price=item.product.price
+            )
+
+        cart.items.all().delete()  # clear cart after checkout
+        return Response(
+            {
+                "message": "Checkout successful",
+                "order_id": order.id,
+                "total": total_price
+            },
+            status=status.HTTP_201_CREATED
+        )
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -121,6 +157,13 @@ class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     permission_classes = [IsAdminOrReadOnly]
     parser_classes = [MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        queryset = Product.objects.all()
+        category_id = self.request.query_params.get("category")
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+        return queryset
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
