@@ -1,13 +1,31 @@
 
 from rest_framework import viewsets, status
-from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated, IsAdminUser
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 from .models import Product, Category, Cart, CartItem, Order, OrderItem
-from .serializers import ProductSerializer, CategorySerializer, CartSerializer
+from .serializers import ProductSerializer, CategorySerializer, CartSerializer, OrderSerializer
 from .permissions import IsAdminOrReadOnly
+
+from paystackapi.transaction import Transaction
+
+class OrderViewSet(viewsets.ModelViewSet):
+    queryset = Order.objects.all().order_by('-created_at')
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminUser]
+    
+    def partial_update(self, request, *args, **kwargs):
+        order = self.get_object()
+        status_value = request.data.get("status")
+        
+        if status_vallue :
+            order.status = status_value
+            order.save()
+        
+        serializer = self.get_serializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class CartViewSet(viewsets.ViewSet):
