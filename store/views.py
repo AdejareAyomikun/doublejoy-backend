@@ -1,29 +1,42 @@
-
-from rest_framework import viewsets, status
-from rest_framework.permissions import SAFE_METHODS, BasePermission, AllowAny, IsAuthenticated, IsAdminUser
+import hashlib
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+from django.conf import settings
+from django.db.models import Sum, Avg
+from rest_framework import viewsets, status, permissions, authentication
+from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 from .models import Product, Category, Cart, CartItem, Order, OrderItem
 from .serializers import ProductSerializer, CategorySerializer, CartSerializer, OrderSerializer
-from .permissions import IsAdminOrReadOnly
+from .permissions import IsAdminOrReadOnly,  PublicReadAdminWrite
 
 from paystackapi.transaction import Transaction
+from django.utils import timezone
+import json
+
+DELIVERY_FEES = {
+    "lagos": 5000,
+    "ogun": 8000,
+    "oyo": 8000,
+}
 
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all().order_by('-created_at')
     serializer_class = OrderSerializer
     permission_classes = [IsAdminUser]
-    
+
     def partial_update(self, request, *args, **kwargs):
         order = self.get_object()
         status_value = request.data.get("status")
-        
-        if status_vallue :
+
+        if status_value:
             order.status = status_value
             order.save()
-        
+
         serializer = self.get_serializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -136,13 +149,39 @@ class CartViewSet(viewsets.ViewSet):
                 {"error": "Cart is empty"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        total_price = sum(
+
+        address = request.data.get("address")
+        city = request.data.get("city")
+        state = request.data.get("state")
+
+        if not all([address, city, state]):
+            return Response(
+                {"error": "Address, City and State are required"},
+                status=status.Http_400_BAD_REQUEST
+            )
+        state_key = state.lower()
+
+        if state_key not in DELIVERY_FEES:
+            return Response(
+                {"error": "Delivery is only available in Lagos, Ogun and Oyo"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cart_total = sum(
             item.product.price * item.quantity for item in cart.items.all()
         )
 
+        delivery_fee = DELIVERY_FEES[state_key]
+
+        total_amount = cart_total + delivery_fee
+
         order = Order.objects.create(
             user=request.user,
-            total_price=total_price,
+            total_amount=total_amount,
+            delivery_fee=delivery_fee,
+            address=address,
+            city=city,
+            state=state,
             status="pending"
         )
         for item in cart.items.all():
@@ -153,34 +192,183 @@ class CartViewSet(viewsets.ViewSet):
                 price=item.product.price
             )
 
-        cart.items.all().delete()  # clear cart after checkout
-        return Response(
-            {
-                "message": "Checkout successful",
-                "order_id": order.id,
-                "total": total_price
-            },
-            status=status.HTTP_201_CREATED
+        paystack_amount = int(total_amount * 100)  # amount in kobo
+
+        response = Transaction.initialize(
+            reference=f"Order-{order.id}",
+            amount=paystack_amount,
+            email=request.user.email or "test@example.com",
+            callback_url="http://localhost:3000/payment/success",
+            secret_key=settings.PAYSTACK_SECRET_KEY,
         )
+        order.paystack_reference = response["data"]["reference"]
+        order.save()
+
+        cart.items.all().delete()  # clear cart after checkout
+
+        if not response.get("status"):
+            return Response(
+                {
+                    "error": "Payment initialization failed",
+                    "message": response.get("message"),
+                },
+                status=400,
+            )
+
+        return Response({
+            "payment_url": response["data"]["authorization_url"],
+            "reference": response["data"]["reference"],
+            "order_id": order.id
+        }, status=200)
+
+    @action(detail=False, methods=["get"])
+    def verify_payment(self, request):
+        reference = request.query_params.get("reference")
+
+        if not reference:
+            return Response({"error": "Reference is required"}, status=400)
+
+        response = Transaction.verify(
+            reference=reference
+        )
+
+        if response["data"]["status"] == "success":
+            order = Order.objects.get(paystack_reference=reference)
+            order.status = "paid"
+            order.paid_at = timezone.now()
+            order.save()
+
+            return Response({
+                "message": "Payment verified",
+                "order_id": order.id
+            })
+
+        return Response({"error": "Payment verification failed"}, status=400)
+
+    @action(detail=False, methods=["post"])
+    def paystack_init(self, request):
+        order_id = request.data.get("order_id")
+
+        try:
+            order = Order.objects.get(id=order_id, user=request.user)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        response = Transaction.initialize(
+            email=request.user.email,
+            amount=int(order.total_price * 100),  # amount in kobo
+            reference=f"ORDER-{order.id}"
+        )
+        return Response(response, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"])
+    def paystack_verify(self, request):
+        reference = request.data.get("reference")
+
+        if not reference:
+            return Response(
+                {"error": "Payment reference is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        response = Transaction.verify(reference=reference)
+
+        if response['data']['status'] == 'success':
+            order_id = reference.replace("ORDER_", "")
+
+            try:
+                order = Order.objects.get(id=order_id)
+                order.status = "paid"
+                order.save()
+            except Order.DoesNotExist:
+                pass
+
+            return Response(
+                {"message": "Payment verified successfully"},
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {"error": "Payment verification failed"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+@csrf_exempt
+def paystack_webhook(request):
+    paystack_signature = request.headers.get("x-paystack-signature")
+
+    computed_signature = hashlib.sha512(
+        request.body + settings.PAYSTACK_SECRET_KEY.encode()
+    ).hexdigest()
+
+    if computed_signature != paystack_signature:
+        return HttpResponse(status=401)
+
+    payload = json.loads(request.body)
+
+    if payload["event"] == "charge.success":
+        reference = payload["data"]["reference"]
+
+        try:
+            order = Order.objects.get(paystack_reference=reference)
+            order.status = "paid"
+            order.paid_at = timezone.now()
+            order.save()
+        except Order.DoesNotExist:
+            pass
+
+    return HttpResponse(status=200)
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = [AllowAny]
+
+    authentication_classes = [
+        JWTAuthentication,
+        authentication.SessionAuthentication,
+        authentication.BasicAuthentication,
+    ]
+    permission_classes = [PublicReadAdminWrite]
 
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsAdminOrReadOnly]
+
+    authentication_classes = [
+        JWTAuthentication,
+        authentication.SessionAuthentication,
+        authentication.BasicAuthentication,
+    ]
+
+    permission_classes = [PublicReadAdminWrite]
     parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         queryset = Product.objects.all()
+
         category_id = self.request.query_params.get("category")
+        tag = self.request.query_params.get("tag")
         if category_id:
             queryset = queryset.filter(category_id=category_id)
+
+        if tag == "best_seller":
+            queryset = queryset.annotate(
+                total_sold=Sum("Orderitem__quantity")
+            ).order_by("-total_sold")
+
+        elif tag == "top_rate":
+            queryset = queryset.annotate(
+                avg_rating=Avg("reviews__rating")
+            ).order_by("-avg_rating")
+
+        elif tag:
+            queryset = queryset.filter(tags=tag)
+
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -191,10 +379,3 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         self.perform_create(serializer)
         return Response(serializer.data, status=201)
-
-
-class IsAdminOrReadOnly(BasePermission):
-    def has_permission(self, request, view):
-        if request.method in SAFE_METHODS:
-            return True
-        return bool(request.user and request.user.is_staff)
