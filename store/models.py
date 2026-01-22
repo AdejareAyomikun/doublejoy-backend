@@ -88,6 +88,7 @@ class Order(models.Model):
         ("paid", "Paid"),
         ("shipped", "Shipped"),
         ("delivered", "Delivered"),
+        ("completed", "Completed"),
         ("cancelled", "Cancelled"),
     )
     user = models.ForeignKey(

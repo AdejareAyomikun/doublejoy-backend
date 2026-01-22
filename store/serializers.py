@@ -13,6 +13,13 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = "__all__"
 
+    def update(self, instance, validated_data):
+        # Only update the fields sent in the request
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
 
 class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
@@ -45,12 +52,33 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = "__all__"
+        fields = [
+            "id",
+            "product",
+            "product_name",
+            "quantity",
+            "price",
+        ]
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    user = serializers.CharField(source="user.username", read_only=True)
+    email = serializers.EmailField(source="user.email", read_only=True)
     items = OrderItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Order
-        fields = "__all__"
+        fields = [
+            "id",
+            "user",
+            "email",
+            "address",
+            "city",
+            "state",
+            "status",
+            "total_amount",
+            "delivery_fee",
+            "created_at",
+            "items",
+        ]
+        read_only_fields = ["user", "status", "created_at"]

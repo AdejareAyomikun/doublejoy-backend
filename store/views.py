@@ -24,10 +24,25 @@ DELIVERY_FEES = {
     "oyo": 8000,
 }
 
+
 class OrderViewSet(viewsets.ModelViewSet):
-    queryset = Order.objects.all().order_by('-created_at')
+    # queryset = Order.objects.all().order_by('-created_at')
+    # serializer_class = OrderSerializer
+    # permission_classes = [IsAdminUser]
+
     serializer_class = OrderSerializer
-    permission_classes = [IsAdminUser]
+    print("🔥 LOADED OrderViewSet from:", __file__)
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    def get_queryset(self):
+        qs = Order.objects.all().order_by("-created_at")
+        if self.request.user.is_staff:
+            return qs
+        return qs.filter(user=self.request.user)
 
     def partial_update(self, request, *args, **kwargs):
         order = self.get_object()
@@ -157,7 +172,7 @@ class CartViewSet(viewsets.ViewSet):
         if not all([address, city, state]):
             return Response(
                 {"error": "Address, City and State are required"},
-                status=status.Http_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST
             )
         state_key = state.lower()
 
@@ -259,7 +274,7 @@ class CartViewSet(viewsets.ViewSet):
 
         response = Transaction.initialize(
             email=request.user.email,
-            amount=int(order.total_price * 100),  # amount in kobo
+            amount=int(order.total_amount * 100),  # amount in kobo
             reference=f"ORDER-{order.id}"
         )
         return Response(response, status=status.HTTP_200_OK)
@@ -358,10 +373,10 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         if tag == "best_seller":
             queryset = queryset.annotate(
-                total_sold=Sum("Orderitem__quantity")
+                total_sold=Sum("items__quantity")
             ).order_by("-total_sold")
 
-        elif tag == "top_rate":
+        elif tag == "top_rated":
             queryset = queryset.annotate(
                 avg_rating=Avg("reviews__rating")
             ).order_by("-avg_rating")
@@ -379,3 +394,17 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         self.perform_create(serializer)
         return Response(serializer.data, status=201)
+
+    def update(self, request, *args, **kwargs):
+        partial = True  # 🔑 allow partial updates
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=partial
+        )
+
+        if not serializer.is_valid():
+            print("❌ UPDATE ERRORS:", serializer.errors)
+            return Response(serializer.errors, status=400)
+
+        self.perform_update(serializer)
+        return Response(serializer.data)
