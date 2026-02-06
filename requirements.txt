@@ -3,7 +3,7 @@ certifi
 charset-normalizer
 cloudinary
 dj-database-url
-django
+django==5.0
 django-cloudinary-storage
 djangorestframework
 django-cors-headers
