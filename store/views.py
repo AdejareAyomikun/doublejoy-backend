@@ -24,6 +24,15 @@ DELIVERY_FEES = {
     "oyo": 8000,
 }
 
+ALLOWED_STATUS_TRANSITIONS = {
+    "pending": ["paid", "cancelled"],
+    "paid": ["shipped", "cancelled"],
+    "shipped": ["delivered"],
+    "delivered": ["completed"],
+    "completed": [],
+    "cancelled": [],
+}
+
 
 class OrderViewSet(viewsets.ModelViewSet):
     # queryset = Order.objects.all().order_by('-created_at')
@@ -46,11 +55,28 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         order = self.get_object()
+        new_status = request.data.get("status")
         status_value = request.data.get("status")
 
-        if status_value:
-            order.status = status_value
-            order.save()
+        if not new_status:
+            return Response(
+                {"Error": "Status is Required"}, status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        allowed = ALLOWED_STATUS_TRANSITIONS.get(order.status, [])
+
+        if new_status not in allowed:
+            return Response(
+                {"Error": f"Cannot change status from {order.status} to {new_status}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order.status = new_status
+        order.save(update_fields=["status"])
+
+        # if status_value:
+        #     order.status = status_value
+        #     order.save()
 
         serializer = self.get_serializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -348,6 +374,22 @@ class CategoryViewSet(viewsets.ModelViewSet):
         authentication.BasicAuthentication,
     ]
     permission_classes = [PublicReadAdminWrite]
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        data = {}
+
+        if "image" in request.data:
+            data["image"] = request.data["image"]
+
+        serializer = self.get_serializer(
+            instance,
+            data=data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class ProductViewSet(viewsets.ModelViewSet):

@@ -5,8 +5,7 @@ from .models import Product, Category, Cart, CartItem, Order, OrderItem
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ["id", "name"]
-
+        fields = "__all__"
 
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
@@ -19,7 +18,6 @@ class ProductSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         return instance
-
 
 class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
@@ -37,7 +35,6 @@ class CartItemSerializer(serializers.ModelSerializer):
         if obj.product.image:
             return request.build_absolute_uri(obj.product.image.url)
         return None
-
 
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)

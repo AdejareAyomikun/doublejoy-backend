@@ -6,10 +6,10 @@ from django.conf import settings
 
 User = get_user_model()
 
-
 class Category(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(unique=True, blank=True)
+    image = models.ImageField(upload_to="categories/", blank=True, null=True)
 
     def save(self, *args, **kwargs):
         if not self.slug:

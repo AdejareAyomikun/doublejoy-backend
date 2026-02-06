@@ -1,3 +1,6 @@
+import os
+import dj_database_url
+
 from datetime import timedelta
 from pathlib import Path
 from decouple import config
@@ -9,6 +12,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     'localhost',
     "127.0.0.1",
+    '.onrender.com',
 ]
 
 INSTALLED_APPS = [
@@ -17,25 +21,49 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+
+    'cloudinary_storage',
     'django.contrib.staticfiles',
-    
+    'cloudinary',
+
     'rest_framework',
     'corsheaders',
-    
     'store',
     'accounts',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
 ]
+
+DATABASES = {
+    # 'default': {
+    #     'ENGINE': 'django.db.backends.postgresql',
+    #     'NAME': 'doublejoy',
+    #     'USER': 'postgres',
+    #     'PASSWORD': config('DB_PASSWORD'),
+    #     'HOST': 'localhost',
+    #     'PORT': '5432',
+    # }
+    
+    'default': dj_database_url.config(
+        # default=f"postgres://postgres:{config('DB_PASSWORD')}@localhost:5432/doublejoy",
+        default=config('DATABASE_URL'),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+}
+
+STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 ROOT_URLCONF = 'config.urls'
 
@@ -57,16 +85,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'doublejoy',
-        'USER': 'postgres',
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -92,9 +110,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
-
-STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
