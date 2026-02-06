@@ -5,27 +5,16 @@ from datetime import timedelta
 from store.models import Order, OrderItem
 
 
-# def sales_summary():
-#     return {
-#         "total_orders": Order.objects.count(),
-#         "total_revenue": Order.objects.filter(status="paid").aggregate(
-#             total=Sum("total_amount")
-#         )["total"] or 0,
-#         "pending_orders": Order.objects.filter(status="pending").count(),
-#         "completed_orders": Order.objects.filter(status="delivered").count(),
-#     }
-
-
 def daily_sales(days=7):
     start_date = timezone.now() - timedelta(days=days)
     return (
-        Order.objects.filter(status__in=["paid", "delivered", "shipped"< "completed"], created_at__gte=start_date)
+        Order.objects.filter(status__in=[
+                             "paid", "delivered", "shipped" < "completed"], created_at__gte=start_date)
         .annotate(day=TruncDate("created_at"))
         .values("day")
         .annotate(total=Sum("total_amount"), orders=Count("id"))
         .order_by("day")
     )
-
 
 
 def best_selling_products(limit=5):

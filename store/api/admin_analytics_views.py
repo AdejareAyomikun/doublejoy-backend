@@ -22,7 +22,7 @@ class AdminDashboardAnalytics(APIView):
         today = now().date()
 
         total_orders = Order.objects.count()
-        pending_orders = Order.objects.filter(status__in=["pending", "shipped"]).count()
+        pending_orders = Order.objects.filter(status__in=["paid","pending", "shipped"]).count()
         completed_orders = Order.objects.filter(status__in=["delivered", "completed", "cancelled"]).count()
 
         total_revenue = Order.objects.filter(status__in=["paid", "delivered", "shipped", "completed"]).aggregate(
