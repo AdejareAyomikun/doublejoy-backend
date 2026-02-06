@@ -129,6 +129,15 @@ cloudinary.config(
   api_secret = config('CLOUDINARY_API_SECRET'),
   secure = True
 )
+print("--- CLOUDINARY DEBUG START ---")
+print(f"CLOUD_NAME: {cloudinary.config().cloud_name}")
+print(f"API_KEY: {cloudinary.config().api_key}")
+secret = cloudinary.config().api_secret
+if secret:
+    print(f"SECRET_PREFIX: {secret[:4]}... (Total Length: {len(secret)})")
+else:
+    print("SECRET_PREFIX: None")
+print("--- CLOUDINARY DEBUG END ---")
 
 STORAGES = {
     "default": {
