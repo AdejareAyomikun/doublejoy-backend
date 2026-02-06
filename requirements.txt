@@ -7,7 +7,7 @@ django
 django-cloudinary-storage
 djangorestframework
 django-cors-headers
-django-rest-framework-simplejwt
+djangorestframework-simplejwt
 gunicorn
 idna
 packaging
